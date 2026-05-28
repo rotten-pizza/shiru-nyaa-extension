@@ -1,0 +1,37 @@
+[
+  {
+    "id": "nyaa",
+    "name": "Nyaa",
+    "version": "0.1.0",
+    "main": "sources/nyaa",
+    "update": "gh:rotten-pizza/shiru-nyaa-extension",
+    "type": "torrent",
+    "speed": "fast",
+    "accuracy": "medium",
+    "regions": ["US", "GB", "NL"],
+    "unregulated": true,
+    "settings": [
+      {
+        "type": "dropdown",
+        "key": "category",
+        "label": "Category",
+        "default": "english",
+        "description": "Which Nyaa anime category to search.",
+        "options": [
+          { "label": "English-translated", "value": "english" },
+          { "label": "Non-English-translated", "value": "nonEnglish" },
+          { "label": "Raw", "value": "raw" },
+          { "label": "All anime", "value": "all" }
+        ]
+      },
+      {
+        "type": "toggle",
+        "key": "trustedOnly",
+        "label": "Trusted Uploaders Only",
+        "default": false,
+        "description": "Only return torrents from Nyaa's trusted uploaders. Fewer results, higher accuracy."
+      }
+    ],
+    "description": "Searches nyaa.si via its public RSS feed and returns magnet links for single episodes, batches, and movies. No account or API key required."
+  }
+]

@@ -1,0 +1,12 @@
+{
+  "name": "shiru-nyaa-extension",
+  "version": "0.1.0",
+  "description": "Nyaa.si torrent source extension for Shiru",
+  "license": "GPL-3.0",
+  "main": "index.json",
+  "types": "sources/index.d.ts",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/rotten-pizza/shiru-nyaa-extension.git"
+  }
+}
