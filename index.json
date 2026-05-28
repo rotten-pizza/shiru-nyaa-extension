@@ -2,15 +2,24 @@
   {
     "id": "nyaa",
     "name": "Nyaa",
-    "version": "0.1.0",
+    "version": "0.2.0",
     "main": "sources/nyaa",
     "update": "gh:rotten-pizza/shiru-nyaa-extension",
     "type": "torrent",
     "speed": "fast",
     "accuracy": "medium",
-    "regions": ["US", "GB", "NL"],
+    "regions": ["IN", "NL", "US", "GB"],
     "unregulated": true,
     "settings": [
+      {
+        "type": "text",
+        "key": "baseUrl",
+        "label": "Mirror URL",
+        "default": "https://nyaa.si",
+        "required": false,
+        "placeholder": "https://nyaa.si",
+        "description": "Base URL of the Nyaa instance to query. If your ISP (e.g. Jio in India) blocks nyaa.si, paste a working mirror here. Leave empty to use the default."
+      },
       {
         "type": "dropdown",
         "key": "category",
@@ -32,6 +41,6 @@
         "description": "Only return torrents from Nyaa's trusted uploaders. Fewer results, higher accuracy."
       }
     ],
-    "description": "Searches nyaa.si via its public RSS feed and returns magnet links for single episodes, batches, and movies. No account or API key required."
+    "description": "Searches nyaa.si via its public RSS feed and returns magnet links for single episodes, batches, and movies. Tuned for use in India: if your ISP blocks nyaa.si, set a mirror URL in the extension settings. No account or API key required."
   }
 ]
