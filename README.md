@@ -12,10 +12,20 @@ In Shiru: **Settings → Extensions → Add Extension**, then paste:
 gh:rotten-pizza/shiru-nyaa-extension
 ```
 
+## Availability
+
+If `nyaa.si` is unreachable (down, or blocked by your ISP) the extension
+automatically falls back to known mirrors (`nyaa.land`, `nyaa.iss.one`,
+`nyaa.net`) and uses the first one that returns a valid RSS feed. Requests
+that hang are timed out rather than left to stall, so a blocked host fails
+over quickly instead of reporting the source as unavailable. You can still
+point it at a specific instance first with the **Mirror URL** setting.
+
 ## Settings
 
 | Setting | Description |
 |---|---|
+| Mirror URL | Optional Nyaa instance to try first, ahead of the built-in fallbacks |
 | Category | English-translated / Non-English / Raw / All |
 | Trusted Uploaders Only | Restrict results to Nyaa's trusted uploader flag |
 

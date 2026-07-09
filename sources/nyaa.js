@@ -18,8 +18,16 @@ const CATEGORIES = {
   all: '1_0'
 }
 
+// Tried in order. The first host that actually returns valid RSS wins, so
+// listing mirrors here lets the source recover automatically when the primary
+// host is blocked or down (e.g. an ISP dropping nyaa.si) without any user
+// configuration. Dead mirrors are skipped harmlessly by the RSS validation in
+// #fetchRss / validate().
 const FALLBACK_HOSTS = [
-  'https://nyaa.si'
+  'https://nyaa.si',
+  'https://nyaa.land',
+  'https://nyaa.iss.one',
+  'https://nyaa.net'
 ]
 
 const REQUEST_TIMEOUT_MS = 8000

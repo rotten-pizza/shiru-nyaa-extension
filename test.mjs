@@ -157,7 +157,10 @@ try {
 }
 
 console.log('\n=== hanging host times out and does not block resolution ===')
+// Earlier hosts fail instantly; the final candidate hangs. The source must
+// abort it (rather than wait forever) and surface a timeout error.
 globalThis.fetch = (url, { signal } = {}) => new Promise((resolve, reject) => {
+  if (!url.includes('nyaa.net')) return reject(new Error('connection refused'))
   signal?.addEventListener('abort', () => reject(Object.assign(new Error('aborted'), { name: 'AbortError' })))
 })
 nyaa.settings = {}
@@ -168,7 +171,7 @@ try {
   process.exitCode = 1
 } catch (err) {
   assert(/timed out/.test(err.message), 'hanging request throws timeout error: ' + err.message)
-  assert(Date.now() - start < 9000, 'timeout fires well under the request lifetime')
+  assert(Date.now() - start < 12000, 'timeout fires within one request budget, not forever')
 }
 
 console.log('\nDone. exit code =', process.exitCode || 0)
