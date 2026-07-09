@@ -22,6 +22,8 @@ const FALLBACK_HOSTS = [
   'https://nyaa.si'
 ]
 
+const REQUEST_TIMEOUT_MS = 8000
+
 function parseSize (input) {
   if (!input) return 0
   const match = String(input).match(/([\d.]+)\s*(KiB|MiB|GiB|TiB|KB|MB|GB|TB|B)/i)
@@ -49,6 +51,19 @@ function decodeEntities (s) {
     .replace(/&apos;/g, "'")
     .replace(/&#x([0-9a-f]+);/gi, (_, h) => String.fromCodePoint(parseInt(h, 16)))
     .replace(/&#(\d+);/g, (_, n) => String.fromCodePoint(Number(n)))
+}
+
+async function fetchWithTimeout (url, ms = REQUEST_TIMEOUT_MS) {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), ms)
+  try {
+    return await fetch(url, { signal: controller.signal })
+  } catch (err) {
+    if (err?.name === 'AbortError') throw new Error(`Request to ${url} timed out after ${ms}ms`)
+    throw err
+  } finally {
+    clearTimeout(timer)
+  }
 }
 
 function normalizeHost (raw) {
@@ -131,7 +146,7 @@ export default new class NyaaSource extends AbstractSource {
   }
 
   async #fetchRss (host, query) {
-    const res = await fetch(this.#endpoint(host, query))
+    const res = await fetchWithTimeout(this.#endpoint(host, query))
     if (!res.ok) throw new Error(`${host} returned HTTP ${res.status}`)
     const text = await res.text()
     if (!/<rss\b|<channel\b|<item\b/i.test(text)) {
@@ -189,7 +204,7 @@ export default new class NyaaSource extends AbstractSource {
   async validate () {
     for (const host of this.#candidateHosts()) {
       try {
-        const res = await fetch(`${host}/?page=rss&q=test`)
+        const res = await fetchWithTimeout(`${host}/?page=rss&q=test`)
         if (!res.ok) continue
         const text = await res.text()
         if (/<rss\b|<channel\b/i.test(text)) {
