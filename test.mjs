@@ -156,4 +156,19 @@ try {
   assert(/did not return RSS/.test(err.message), 'HTML response throws: ' + err.message)
 }
 
+console.log('\n=== hanging host times out and does not block resolution ===')
+globalThis.fetch = (url, { signal } = {}) => new Promise((resolve, reject) => {
+  signal?.addEventListener('abort', () => reject(Object.assign(new Error('aborted'), { name: 'AbortError' })))
+})
+nyaa.settings = {}
+const start = Date.now()
+try {
+  await nyaa.single({ titles: ['Test'], episode: 1, resolution: '1080', exclusions: [] })
+  console.error('  FAIL: expected throw on timeout')
+  process.exitCode = 1
+} catch (err) {
+  assert(/timed out/.test(err.message), 'hanging request throws timeout error: ' + err.message)
+  assert(Date.now() - start < 9000, 'timeout fires well under the request lifetime')
+}
+
 console.log('\nDone. exit code =', process.exitCode || 0)
