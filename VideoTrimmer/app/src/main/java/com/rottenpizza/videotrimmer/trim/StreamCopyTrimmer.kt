@@ -87,7 +87,12 @@ object StreamCopyTrimmer {
             // Copy one track at a time. Each track is independently seeked to the
             // start keyframe and drained up to endUs. Timestamps carry over
             // unchanged (minus the shared offset), so nothing is re-timed.
+            //
+            // Progress is throttled to ~1% steps: firing on every sample would
+            // flood the UI with thousands of recompositions and actually slow
+            // the copy down. The tight loop below does nothing but move bytes.
             var trackOrdinal = 0
+            var lastProgress = -1f
             for ((src, dst) in srcToDst) {
                 extractor.selectTrack(src)
                 extractor.seekTo(startUs, MediaExtractor.SEEK_TO_PREVIOUS_SYNC)
@@ -106,7 +111,11 @@ object StreamCopyTrimmer {
                     muxer.writeSampleData(dst, buffer, info)
 
                     val intra = ((sampleTime - startUs).toFloat() / rangeUs).coerceIn(0f, 1f)
-                    onProgress(((trackOrdinal + intra) / trackCount).coerceIn(0f, 1f))
+                    val overall = ((trackOrdinal + intra) / trackCount).coerceIn(0f, 1f)
+                    if (overall - lastProgress >= 0.01f) {
+                        lastProgress = overall
+                        onProgress(overall)
+                    }
 
                     if (!extractor.advance()) break
                 }
