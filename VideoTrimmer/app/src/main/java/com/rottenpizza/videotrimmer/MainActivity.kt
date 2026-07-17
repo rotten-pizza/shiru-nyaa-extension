@@ -1,6 +1,7 @@
 package com.rottenpizza.videotrimmer
 
 import android.Manifest
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
@@ -8,7 +9,6 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -90,20 +90,26 @@ private fun AppRoot() {
     var tab by remember { mutableStateOf(Tab.EDIT) }
     var showSettings by remember { mutableStateOf(false) }
     val snackbar = remember { SnackbarHostState() }
+    val context = LocalContext.current
 
+    // Storage Access Framework exposes the real original filename (the photo
+    // picker can hand back a synthetic numeric id for cloud/OEM items).
     val pickLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.PickVisualMedia(),
+        ActivityResultContracts.OpenDocument(),
     ) { uri ->
         if (uri != null) {
+            try {
+                context.contentResolver.takePersistableUriPermission(
+                    uri, Intent.FLAG_GRANT_READ_URI_PERMISSION,
+                )
+            } catch (_: Exception) {
+                // Not all providers allow persisting; reading still works now.
+            }
             trimVm.loadVideo(uri)
             tab = Tab.EDIT
         }
     }
-    val launchPicker = {
-        pickLauncher.launch(
-            PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.VideoOnly),
-        )
-    }
+    val launchPicker = { pickLauncher.launch(arrayOf("video/*")) }
 
     val trimState by trimVm.state.collectAsStateWithLifecycle()
     LaunchedEffect(trimState.message) {

@@ -46,9 +46,13 @@ object VideoMetadataReader {
     }
 
     private fun queryNameAndSize(context: Context, uri: Uri): Pair<String, Long> {
-        var name = "video.mp4"
+        var name: String? = null
         var size = 0L
-        context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+        context.contentResolver.query(
+            uri,
+            arrayOf(OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE),
+            null, null, null,
+        )?.use { cursor ->
             if (cursor.moveToFirst()) {
                 val nameIdx = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
                 if (nameIdx >= 0 && !cursor.isNull(nameIdx)) name = cursor.getString(nameIdx)
@@ -56,8 +60,23 @@ object VideoMetadataReader {
                 if (sizeIdx >= 0 && !cursor.isNull(sizeIdx)) size = cursor.getLong(sizeIdx)
             }
         }
-        return name to size
+
+        // If the provider gave no name, or a synthetic all-digits id, fall back
+        // to the last path segment so the default trim name still reads sensibly.
+        if (name.isNullOrBlank() || isSyntheticName(name!!)) {
+            val fromPath = uri.lastPathSegment
+                ?.substringAfterLast('/')
+                ?.substringAfterLast(':')
+            if (!fromPath.isNullOrBlank() && !isSyntheticName(fromPath)) name = fromPath
+        }
+
+        return (name?.ifBlank { null } ?: "video.mp4") to size
     }
+
+    /** True for a name that is just digits (optionally with an extension). */
+    private fun isSyntheticName(name: String): Boolean =
+        name.substringBeforeLast('.', name).all { it.isDigit() } &&
+            name.substringBeforeLast('.', name).isNotEmpty()
 
     /**
      * METADATA_KEY_DATE is an ISO-ish string like "20230115T103000.000Z".
