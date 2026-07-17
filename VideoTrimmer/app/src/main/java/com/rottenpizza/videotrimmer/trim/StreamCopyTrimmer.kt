@@ -6,7 +6,7 @@ import android.media.MediaExtractor
 import android.media.MediaFormat
 import android.media.MediaMuxer
 import android.net.Uri
-import java.io.FileDescriptor
+import java.io.File
 import java.io.IOException
 import java.nio.ByteBuffer
 
@@ -25,10 +25,15 @@ object StreamCopyTrimmer {
 
     /**
      * Copies the range [[startUs], [endUs]] of every audio/video track from
-     * [source] into the MP4 written to [outputFd].
+     * [source] into the MP4 written to the local file [output].
+     *
+     * Writing to a real filesystem path (not a MediaStore fd) is deliberate:
+     * MediaMuxer emits many small, seeking writes and rewrites the moov atom on
+     * stop(), which is pathologically slow over a FUSE-backed content fd. The
+     * caller copies the finished file into the gallery in one sequential pass.
      *
      * @param rotationDegrees written to the container via [MediaMuxer.setOrientationHint].
-     * @param onProgress fraction in [0f, 1f] for this single range; called frequently.
+     * @param onProgress fraction in [0f, 1f] for this single range; throttled internally.
      * @throws IOException on unreadable input or an empty selection.
      */
     fun trim(
@@ -36,7 +41,7 @@ object StreamCopyTrimmer {
         source: Uri,
         startUs: Long,
         endUs: Long,
-        outputFd: FileDescriptor,
+        output: File,
         rotationDegrees: Int,
         onProgress: (Float) -> Unit = {},
     ) {
@@ -48,7 +53,7 @@ object StreamCopyTrimmer {
             // Map source tracks -> muxer tracks, keeping only audio and video.
             val srcToDst = LinkedHashMap<Int, Int>()
             var bufferSize = 0
-            muxer = MediaMuxer(outputFd, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
+            muxer = MediaMuxer(output.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
 
             for (i in 0 until extractor.trackCount) {
                 val format = extractor.getTrackFormat(i)

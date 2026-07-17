@@ -8,6 +8,10 @@ import com.rottenpizza.videotrimmer.model.TrimProgress
 import com.rottenpizza.videotrimmer.model.TrimRange
 import com.rottenpizza.videotrimmer.model.TrimResult
 import com.rottenpizza.videotrimmer.model.VideoInfo
+import java.io.File
+import java.io.FileInputStream
+import java.io.FileOutputStream
+import java.io.RandomAccessFile
 
 /**
  * Orchestrates exporting one or more ranges from a single source in one batch.
@@ -57,34 +61,68 @@ class TrimRepository(private val context: Context) {
             return TrimResult(name, null, e.message ?: "Could not create output")
         }
 
+        // Mux into fast local storage first, then stream the finished file into
+        // the gallery in one sequential pass. Doing the muxing straight to the
+        // MediaStore fd is what made large trims crawl.
+        val cacheRoot = context.externalCacheDir ?: context.cacheDir
+        val temp = File(cacheRoot, "trim_${System.nanoTime()}.mp4")
         try {
-            context.contentResolver.openFileDescriptor(uri, "rw")!!.use { pfd ->
-                StreamCopyTrimmer.trim(
-                    context = context,
-                    source = source.uri,
-                    startUs = range.startMs * 1000L,
-                    endUs = range.endMs * 1000L,
-                    outputFd = pfd.fileDescriptor,
-                    rotationDegrees = source.rotationDegrees,
-                    onProgress = onProgress,
-                )
-            }
+            StreamCopyTrimmer.trim(
+                context = context,
+                source = source.uri,
+                startUs = range.startMs * 1000L,
+                endUs = range.endMs * 1000L,
+                output = temp,
+                rotationDegrees = source.rotationDegrees,
+                // Muxing is the bulk of the work; reserve the last slice for the copy.
+                onProgress = { onProgress(it * 0.9f) },
+            )
 
             if (prefs.patchMoovTime && source.dateTakenMs > 0) {
                 try {
-                    context.contentResolver.openFileDescriptor(uri, "rw")!!.use { pfd ->
-                        MoovPatcher.patch(pfd.fileDescriptor, source.dateTakenMs)
+                    RandomAccessFile(temp, "rw").use { raf ->
+                        MoovPatcher.patch(raf.fd, source.dateTakenMs)
                     }
                 } catch (_: Exception) {
                     // Non-fatal: the clip is already valid with the correct DATE_TAKEN.
                 }
             }
 
+            copyToGallery(temp, uri) { onProgress(0.9f + it * 0.1f) }
+
             GalleryStore.finalize(context, uri, range.durationMs)
             return TrimResult(name, uri, null)
         } catch (e: Exception) {
             GalleryStore.deleteQuietly(context, uri)
             return TrimResult(name, null, e.message ?: "Trim failed")
+        } finally {
+            temp.delete()
+        }
+    }
+
+    /** Single large-buffer sequential copy from the cache file into the gallery. */
+    private fun copyToGallery(source: File, dest: android.net.Uri, onProgress: (Float) -> Unit) {
+        val total = source.length().coerceAtLeast(1)
+        val buffer = ByteArray(1 shl 20) // 1 MB sequential writes are fast over FUSE
+        FileInputStream(source).use { input ->
+            context.contentResolver.openFileDescriptor(dest, "w")?.use { pfd ->
+                FileOutputStream(pfd.fileDescriptor).use { out ->
+                    var copied = 0L
+                    var lastEmit = -1f
+                    while (true) {
+                        val read = input.read(buffer)
+                        if (read < 0) break
+                        out.write(buffer, 0, read)
+                        copied += read
+                        val frac = (copied.toFloat() / total).coerceIn(0f, 1f)
+                        if (frac - lastEmit >= 0.02f) {
+                            lastEmit = frac
+                            onProgress(frac)
+                        }
+                    }
+                    out.flush()
+                }
+            } ?: throw java.io.IOException("Could not open gallery file for writing")
         }
     }
 
