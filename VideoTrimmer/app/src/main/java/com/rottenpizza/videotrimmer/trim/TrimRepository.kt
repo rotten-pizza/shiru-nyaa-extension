@@ -114,21 +114,27 @@ class TrimRepository(private val context: Context) {
         }
     }
 
-    /** Single large-buffer sequential copy from the cache file into the gallery. */
+    /**
+     * Copies the finished cache file into the gallery with a single large
+     * sequential transfer. NIO's transferTo lets the kernel move the bytes
+     * (sendfile) where possible, which handles multi-GB outputs far better than
+     * a byte-array read/write loop and stays fast over FUSE.
+     */
     private fun copyToGallery(source: File, dest: android.net.Uri, onProgress: (Float) -> Unit) {
-        val total = source.length().coerceAtLeast(1)
-        val buffer = ByteArray(1 shl 20) // 1 MB sequential writes are fast over FUSE
         FileInputStream(source).use { input ->
             context.contentResolver.openFileDescriptor(dest, "w")?.use { pfd ->
                 FileOutputStream(pfd.fileDescriptor).use { out ->
-                    var copied = 0L
+                    val inCh = input.channel
+                    val outCh = out.channel
+                    val total = inCh.size().coerceAtLeast(1)
+                    val chunk = 8L shl 20 // 8 MB per transfer
+                    var pos = 0L
                     var lastEmit = -1f
-                    while (true) {
-                        val read = input.read(buffer)
-                        if (read < 0) break
-                        out.write(buffer, 0, read)
-                        copied += read
-                        val frac = (copied.toFloat() / total).coerceIn(0f, 1f)
+                    while (pos < total) {
+                        val moved = inCh.transferTo(pos, chunk, outCh)
+                        if (moved <= 0) break
+                        pos += moved
+                        val frac = (pos.toFloat() / total).coerceIn(0f, 1f)
                         if (frac - lastEmit >= 0.02f) {
                             lastEmit = frac
                             onProgress(frac)
