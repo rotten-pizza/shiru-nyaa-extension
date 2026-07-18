@@ -71,61 +71,63 @@ object StreamCopyTrimmer {
             muxer.setOrientationHint(rotationDegrees)
             muxer.start()
 
-            // A single common offset keeps audio and video in sync: it is the
-            // earliest first-sample timestamp across tracks after seeking to the
-            // start keyframe, so every written timestamp stays >= 0.
-            var offsetUs = Long.MAX_VALUE
-            for (src in srcToDst.keys) {
-                extractor.selectTrack(src)
-                extractor.seekTo(startUs, MediaExtractor.SEEK_TO_PREVIOUS_SYNC)
-                val t = extractor.sampleTime
-                if (t in 0 until offsetUs) offsetUs = t
-                extractor.unselectTrack(src)
-            }
-            if (offsetUs == Long.MAX_VALUE) offsetUs = startUs
+            // Select every mapped track and walk the file in storage order with a
+            // single seek + advance() loop. This reads the source sequentially —
+            // the interleaved on-disk layout is followed as-is — instead of
+            // draining one track at a time, which strides randomly across the
+            // whole file (twice) and crawls over a content/FUSE source.
+            for (src in srcToDst.keys) extractor.selectTrack(src)
+            extractor.seekTo(startUs, MediaExtractor.SEEK_TO_PREVIOUS_SYNC)
+
+            // A single common offset keeps audio and video in sync: the earliest
+            // sample time at the seek position, so every written timestamp >= 0.
+            val offsetUs = extractor.sampleTime.let { if (it < 0) startUs else it }
 
             val buffer = ByteBuffer.allocateDirect(bufferSize)
             val info = MediaCodec.BufferInfo()
             val rangeUs = (endUs - startUs).coerceAtLeast(1)
-            val trackCount = srcToDst.size
 
-            // Copy one track at a time. Each track is independently seeked to the
-            // start keyframe and drained up to endUs. Timestamps carry over
-            // unchanged (minus the shared offset), so nothing is re-timed.
-            //
-            // Progress is throttled to ~1% steps: firing on every sample would
-            // flood the UI with thousands of recompositions and actually slow
-            // the copy down. The tight loop below does nothing but move bytes.
-            var trackOrdinal = 0
+            // Each track stops once its samples pass endUs; the loop ends when all
+            // tracks are done or the stream is exhausted. Progress is throttled to
+            // ~1% steps so the UI isn't flooded with per-sample recompositions.
+            val finished = HashSet<Int>()
             var lastProgress = -1f
-            for ((src, dst) in srcToDst) {
-                extractor.selectTrack(src)
-                extractor.seekTo(startUs, MediaExtractor.SEEK_TO_PREVIOUS_SYNC)
-                while (true) {
-                    val sampleTime = extractor.sampleTime
-                    if (sampleTime < 0) break            // end of stream
-                    if (sampleTime > endUs) break        // past the requested end
-                    val size = extractor.readSampleData(buffer, 0)
-                    if (size < 0) break
-                    buffer.position(0)
-                    buffer.limit(size)
-                    info.offset = 0
-                    info.size = size
-                    info.presentationTimeUs = sampleTime - offsetUs
-                    info.flags = sampleFlagsToBufferFlags(extractor.sampleFlags)
-                    muxer.writeSampleData(dst, buffer, info)
-
-                    val intra = ((sampleTime - startUs).toFloat() / rangeUs).coerceIn(0f, 1f)
-                    val overall = ((trackOrdinal + intra) / trackCount).coerceIn(0f, 1f)
-                    if (overall - lastProgress >= 0.01f) {
-                        lastProgress = overall
-                        onProgress(overall)
-                    }
-
+            while (finished.size < srcToDst.size) {
+                val srcTrack = extractor.sampleTrackIndex
+                if (srcTrack < 0) break                       // end of stream
+                val dst = srcToDst[srcTrack]
+                if (dst == null) {
                     if (!extractor.advance()) break
+                    continue
                 }
-                extractor.unselectTrack(src)
-                trackOrdinal++
+                val sampleTime = extractor.sampleTime
+                if (sampleTime < 0) break
+                if (sampleTime > endUs) {
+                    finished.add(srcTrack)                    // this track is complete
+                    if (!extractor.advance()) break
+                    continue
+                }
+                if (srcTrack in finished) {                    // already past its end
+                    if (!extractor.advance()) break
+                    continue
+                }
+                val size = extractor.readSampleData(buffer, 0)
+                if (size < 0) break
+                buffer.position(0)
+                buffer.limit(size)
+                info.offset = 0
+                info.size = size
+                info.presentationTimeUs = (sampleTime - offsetUs).coerceAtLeast(0)
+                info.flags = sampleFlagsToBufferFlags(extractor.sampleFlags)
+                muxer.writeSampleData(dst, buffer, info)
+
+                val frac = ((sampleTime - startUs).toFloat() / rangeUs).coerceIn(0f, 1f)
+                if (frac - lastProgress >= 0.01f) {
+                    lastProgress = frac
+                    onProgress(frac)
+                }
+
+                if (!extractor.advance()) break
             }
             onProgress(1f)
         } finally {

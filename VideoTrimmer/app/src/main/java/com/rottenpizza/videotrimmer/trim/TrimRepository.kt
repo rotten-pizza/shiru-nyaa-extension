@@ -64,7 +64,21 @@ class TrimRepository(private val context: Context) {
         // Mux into fast local storage first, then stream the finished file into
         // the gallery in one sequential pass. Doing the muxing straight to the
         // MediaStore fd is what made large trims crawl.
-        val cacheRoot = context.externalCacheDir ?: context.cacheDir
+        //
+        // Prefer internal cache (real filesystem, no FUSE) so the muxer's many
+        // small writes are fast; fall back to external app-cache only when the
+        // estimated output wouldn't fit internally.
+        val estimatedBytes = if (source.durationMs > 0) {
+            source.sizeBytes * range.durationMs / source.durationMs
+        } else {
+            source.sizeBytes
+        }
+        val internal = context.cacheDir
+        val cacheRoot = if (internal.usableSpace > estimatedBytes * 13 / 10) {
+            internal
+        } else {
+            context.externalCacheDir ?: internal
+        }
         val temp = File(cacheRoot, "trim_${System.nanoTime()}.mp4")
         try {
             StreamCopyTrimmer.trim(
