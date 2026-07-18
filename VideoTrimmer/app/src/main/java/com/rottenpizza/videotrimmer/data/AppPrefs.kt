@@ -6,9 +6,9 @@ import android.content.Context
 class AppPrefs(context: Context) {
     private val prefs = context.getSharedPreferences("trimr_prefs", Context.MODE_PRIVATE)
 
-    /** Experimental: patch the MP4 moov creation_time to the source date. */
+    /** Patch the MP4 moov creation_time/modification_time to the source date. */
     var patchMoovTime: Boolean
-        get() = prefs.getBoolean(KEY_PATCH_MOOV, false)
+        get() = prefs.getBoolean(KEY_PATCH_MOOV, true)
         set(value) = prefs.edit().putBoolean(KEY_PATCH_MOOV, value).apply()
 
     companion object {

@@ -44,6 +44,9 @@ object GalleryStore {
             put(MediaStore.Video.Media.MIME_TYPE, "video/mp4")
             val taken = if (dateTakenMs > 0) dateTakenMs else System.currentTimeMillis()
             put(MediaStore.Video.Media.DATE_TAKEN, taken)
+            // DATE_MODIFIED is in seconds. The provider may re-stamp it from the
+            // file's mtime, but set it so managed queries can reflect the source.
+            put(MediaStore.Video.Media.DATE_MODIFIED, taken / 1000)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 put(MediaStore.Video.Media.RELATIVE_PATH, RELATIVE_PATH)
                 put(MediaStore.Video.Media.IS_PENDING, 1)

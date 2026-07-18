@@ -193,9 +193,9 @@ private fun SettingsDialog(onDismiss: () -> Unit) {
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
-                        Text("Patch embedded date", style = MaterialTheme.typography.bodyLarge)
+                        Text("Match original date", style = MaterialTheme.typography.bodyLarge)
                         Text(
-                            "Also rewrite the MP4's internal creation_time to the source date (experimental).",
+                            "Set the clip's embedded creation & modification time to the source's date.",
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )

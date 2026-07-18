@@ -3,6 +3,7 @@ package com.rottenpizza.videotrimmer.data
 import android.content.Context
 import android.media.MediaMetadataRetriever
 import android.net.Uri
+import android.provider.DocumentsContract
 import android.provider.OpenableColumns
 import com.rottenpizza.videotrimmer.model.VideoInfo
 import java.text.SimpleDateFormat
@@ -27,7 +28,11 @@ object VideoMetadataReader {
             val mime = context.contentResolver.getType(uri)
                 ?: meta(MediaMetadataRetriever.METADATA_KEY_MIMETYPE)
                 ?: "video/mp4"
+            // Prefer the embedded capture date; fall back to the file's
+            // last-modified time so the output can still match the original.
             val dateTaken = parseCaptureDate(meta(MediaMetadataRetriever.METADATA_KEY_DATE))
+                .takeIf { it > 0 }
+                ?: queryLastModified(context, uri)
 
             return VideoInfo(
                 uri = uri,
@@ -77,6 +82,25 @@ object VideoMetadataReader {
     private fun isSyntheticName(name: String): Boolean =
         name.substringBeforeLast('.', name).all { it.isDigit() } &&
             name.substringBeforeLast('.', name).isNotEmpty()
+
+    /**
+     * The source file's last-modified time in epoch millis, or 0 if the
+     * provider doesn't expose it. SAF documents populate COLUMN_LAST_MODIFIED.
+     */
+    private fun queryLastModified(context: Context, uri: Uri): Long {
+        return try {
+            context.contentResolver.query(
+                uri,
+                arrayOf(DocumentsContract.Document.COLUMN_LAST_MODIFIED),
+                null, null, null,
+            )?.use { c ->
+                val idx = c.getColumnIndex(DocumentsContract.Document.COLUMN_LAST_MODIFIED)
+                if (c.moveToFirst() && idx >= 0 && !c.isNull(idx)) c.getLong(idx) else 0L
+            } ?: 0L
+        } catch (_: Exception) {
+            0L
+        }
+    }
 
     /**
      * METADATA_KEY_DATE is an ISO-ish string like "20230115T103000.000Z".
