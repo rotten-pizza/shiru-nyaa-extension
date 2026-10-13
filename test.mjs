@@ -213,6 +213,12 @@ try {
 } catch (err) {
   assert(err.message.split('\n').length === 2, 'error lists nyaa.si and Anime Tosho failures')
 }
-assert(await nyaa.validate() === false, 'validate() false when everything is down')
+try {
+  await nyaa.validate()
+  console.error('  FAIL: expected validate() to throw'); process.exitCode = 1
+} catch (err) {
+  assert(/https:\/\/nyaa\.si: Failed to fetch/.test(err.message) && /Anime Tosho: Failed to fetch/.test(err.message),
+    'validate() throws with per-source reasons: ' + err.message)
+}
 
 console.log('\nDone. exit code =', process.exitCode || 0)

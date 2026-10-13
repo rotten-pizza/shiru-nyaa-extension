@@ -237,22 +237,28 @@ export default new class NyaaSource extends AbstractSource {
     return this.#search(titles?.[0] ?? '', resolution, exclusions)
   }
 
+  // Throws instead of returning false so Shiru's error toast shows why each source failed
+  // (Shiru otherwise only says "The content source appears to be unreachable").
   async validate () {
+    const errors = []
     for (const host of this.#candidateHosts()) {
       try {
-        const res = await fetchWithTimeout(`${host}/?page=rss&q=test`)
-        if (!res.ok) continue
-        const text = await res.text()
-        if (/<rss\b|<channel\b/i.test(text)) {
-          this.url = host
-          return true
-        }
-      } catch {}
+        await this.#fetchRss(host, 'test')
+        this.url = host
+        return true
+      } catch (err) {
+        const msg = err?.message ?? String(err)
+        errors.push(msg.includes(host) ? msg : `${host}: ${msg}`)
+      }
     }
     try {
       const res = await fetchWithTimeout(`${TOSHO_URL}?q=test`)
-      if (res.ok && Array.isArray(JSON.parse(await res.text()))) return true
-    } catch {}
-    return false
+      if (!res.ok) throw new Error(`Anime Tosho returned HTTP ${res.status}`)
+      if (!Array.isArray(JSON.parse(await res.text()))) throw new Error('Anime Tosho did not return a result list')
+      return true
+    } catch (err) {
+      errors.push(`Anime Tosho: ${err?.message ?? String(err)}`)
+    }
+    throw new Error(`Could not reach Nyaa or Anime Tosho. ${errors.join(' | ')}`)
   }
 }()
