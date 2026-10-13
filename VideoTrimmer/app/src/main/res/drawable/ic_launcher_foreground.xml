@@ -1,0 +1,16 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Film strip / scissors motif centered in the adaptive icon safe zone. -->
+    <path
+        android:fillColor="#7C4DFF"
+        android:pathData="M38,38h32a4,4 0 0 1 4,4v24a4,4 0 0 1 -4,4h-32a4,4 0 0 1 -4,-4v-24a4,4 0 0 1 4,-4z" />
+    <path
+        android:fillColor="#121212"
+        android:pathData="M40,42h4v4h-4z M40,50h4v4h-4z M40,58h4v4h-4z M64,42h4v4h-4z M64,50h4v4h-4z M64,58h4v4h-4z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M50,48h8v12h-8z" />
+</vector>
