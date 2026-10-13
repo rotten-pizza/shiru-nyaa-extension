@@ -24,6 +24,10 @@ const FALLBACK_HOSTS = [
 
 const REQUEST_TIMEOUT_MS = 8000
 
+// Anime Tosho mirrors every Nyaa upload and serves CORS-enabled JSON, so it still works
+// when nyaa.si is blocked by the ISP or its RSS is rejected by the browser's CORS policy.
+const TOSHO_URL = 'https://feed.animetosho.org/json'
+
 function parseSize (input) {
   if (!input) return 0
   const match = String(input).match(/([\d.]+)\s*(KiB|MiB|GiB|TiB|KB|MB|GB|TB|B)/i)
@@ -53,17 +57,15 @@ function decodeEntities (s) {
     .replace(/&#(\d+);/g, (_, n) => String.fromCodePoint(Number(n)))
 }
 
-async function fetchWithTimeout (url, ms = REQUEST_TIMEOUT_MS) {
-  const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), ms)
-  try {
-    return await fetch(url, { signal: controller.signal })
-  } catch (err) {
-    if (err?.name === 'AbortError') throw new Error(`Request to ${url} timed out after ${ms}ms`)
-    throw err
-  } finally {
-    clearTimeout(timer)
-  }
+// Shiru on Android replaces fetch with a bridge that postMessages the request options
+// to the main thread. An AbortSignal cannot be structured-cloned, so passing one makes
+// every request throw a DataCloneError. Time out with Promise.race instead.
+function fetchWithTimeout (url, ms = REQUEST_TIMEOUT_MS) {
+  let timer
+  const timeout = new Promise((_resolve, reject) => {
+    timer = setTimeout(() => reject(new Error(`Request to ${url} timed out after ${ms}ms`)), ms)
+  })
+  return Promise.race([fetch(url), timeout]).finally(() => clearTimeout(timer))
 }
 
 function normalizeHost (raw) {
@@ -155,25 +157,59 @@ export default new class NyaaSource extends AbstractSource {
     return text
   }
 
-  async #search (query) {
-    let lastErr
+  async #searchTosho (terms, resolution, exclusions = []) {
+    const query = this.#buildQuery(terms, resolution)
+    const res = await fetchWithTimeout(`${TOSHO_URL}?q=${encodeURIComponent(query)}`)
+    if (!res.ok) throw new Error(`Anime Tosho returned HTTP ${res.status}`)
+    const items = JSON.parse(await res.text())
+    if (!Array.isArray(items)) throw new Error('Anime Tosho did not return a result list')
+    const excluded = exclusions.filter(Boolean).map(e => e.toLowerCase())
+    const results = []
+    for (const item of items) {
+      if (item?.nyaa_id == null) continue
+      const hash = String(item.info_hash ?? '').toLowerCase()
+      if (!/^[a-f0-9]{40}$/.test(hash)) continue
+      const title = item.title ?? item.torrent_name ?? ''
+      if (excluded.some(e => title.toLowerCase().includes(e))) continue
+      results.push({
+        title,
+        link: item.magnet_uri || this.#magnet(hash, title),
+        hash,
+        seeders: Number(item.seeders) || 0,
+        leechers: Number(item.leechers) || 0,
+        downloads: Number(item.torrent_downloaded_count) || 0,
+        size: Number(item.total_size) || 0,
+        date: item.timestamp ? new Date(item.timestamp * 1000) : new Date(),
+        accuracy: 'medium'
+      })
+    }
+    return results
+  }
+
+  async #search (terms, resolution, exclusions) {
+    const query = this.#buildQuery(terms, resolution, exclusions)
+    const errors = []
     for (const host of this.#candidateHosts()) {
       try {
         const xml = await this.#fetchRss(host, query)
         if (this.url !== host) this.url = host
         return this.#parse(xml)
       } catch (err) {
-        lastErr = err
+        errors.push(err?.message ?? String(err))
       }
     }
-    if (lastErr) throw lastErr
-    return []
+    try {
+      return await this.#searchTosho(terms, resolution, exclusions)
+    } catch (err) {
+      errors.push(err?.message ?? String(err))
+    }
+    throw new Error(errors.join('\n'))
   }
 
   async single ({ titles, resolution, episode, exclusions }) {
     const base = titles?.[0] ?? ''
     const ep = episode != null ? String(episode).padStart(2, '0') : ''
-    return this.#search(this.#buildQuery(`${base} ${ep}`.trim(), resolution, exclusions))
+    return this.#search(`${base} ${ep}`.trim(), resolution, exclusions)
   }
 
   async batch ({ titles, resolution, episodeCount, exclusions }) {
@@ -183,7 +219,7 @@ export default new class NyaaSource extends AbstractSource {
     ranges.push('Batch', 'Complete', 'Season')
 
     const settled = await Promise.allSettled(
-      ranges.map(r => this.#search(this.#buildQuery(`${base} ${r}`, resolution, exclusions)))
+      ranges.map(r => this.#search(`${base} ${r}`, resolution, exclusions))
     )
     const all = settled.flatMap(s => s.status === 'fulfilled' ? s.value : [])
 
@@ -198,7 +234,7 @@ export default new class NyaaSource extends AbstractSource {
   }
 
   async movie ({ titles, resolution, exclusions }) {
-    return this.#search(this.#buildQuery(titles?.[0] ?? '', resolution, exclusions))
+    return this.#search(titles?.[0] ?? '', resolution, exclusions)
   }
 
   async validate () {
@@ -213,6 +249,10 @@ export default new class NyaaSource extends AbstractSource {
         }
       } catch {}
     }
+    try {
+      const res = await fetchWithTimeout(`${TOSHO_URL}?q=test`)
+      if (res.ok && Array.isArray(JSON.parse(await res.text()))) return true
+    } catch {}
     return false
   }
 }()

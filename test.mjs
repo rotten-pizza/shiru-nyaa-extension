@@ -157,9 +157,7 @@ try {
 }
 
 console.log('\n=== hanging host times out and does not block resolution ===')
-globalThis.fetch = (url, { signal } = {}) => new Promise((resolve, reject) => {
-  signal?.addEventListener('abort', () => reject(Object.assign(new Error('aborted'), { name: 'AbortError' })))
-})
+globalThis.fetch = () => new Promise(() => {})
 nyaa.settings = {}
 const start = Date.now()
 try {
@@ -167,8 +165,54 @@ try {
   console.error('  FAIL: expected throw on timeout')
   process.exitCode = 1
 } catch (err) {
-  assert(/timed out/.test(err.message), 'hanging request throws timeout error: ' + err.message)
-  assert(Date.now() - start < 9000, 'timeout fires well under the request lifetime')
+  assert(/timed out/.test(err.message), 'hanging request throws timeout error: ' + err.message.split('\n')[0])
+  assert(Date.now() - start < 20000, 'nyaa + Anime Tosho both time out within ~16s')
 }
+
+console.log('\n=== Android CORS bridge (options are structured-cloned) ===')
+// Mirrors Shiru's createBridge(): Chromium's postMessage() throws a DataCloneError on an
+// AbortSignal (Node's structuredClone does not, so check for it explicitly).
+globalThis.fetch = async (url, options = {}) => {
+  if (Object.values(options).some(v => v instanceof AbortSignal)) {
+    throw new DOMException('AbortSignal object could not be cloned.', 'DataCloneError')
+  }
+  structuredClone({ url, options })
+  lastUrl = url
+  return { ok: true, status: 200, text: async () => SAMPLE_RSS }
+}
+nyaa.settings = {}
+assert(await nyaa.validate() === true, 'validate() works through the bridge')
+const bridged = await nyaa.single({ titles: ['Spy x Family'], episode: 1, resolution: '1080', exclusions: [] })
+assert(bridged.length === 3, 'single() works through the bridge')
+
+console.log('\n=== Anime Tosho fallback when every Nyaa host fails ===')
+const TOSHO = [
+  { title: '[SubsPlease] Spy x Family - 01 (1080p)', nyaa_id: 1500001, info_hash: 'ABCDEF0123456789ABCDEF0123456789ABCDEF01', magnet_uri: 'magnet:?xt=urn:btih:abcdef0123456789abcdef0123456789abcdef01', seeders: 10, leechers: 2, torrent_downloaded_count: 99, total_size: 1500000000, timestamp: 1649512800 },
+  { title: '[Other] Spy x Family - 01 HEVC', nyaa_id: 1500005, info_hash: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb', seeders: 1, leechers: 0, total_size: 1, timestamp: 1649512800 },
+  { title: 'Not on nyaa', nyaa_id: null, info_hash: 'cccccccccccccccccccccccccccccccccccccccc' }
+]
+globalThis.fetch = async (url) => {
+  lastUrl = url
+  if (url.startsWith('https://feed.animetosho.org/')) return { ok: true, status: 200, text: async () => JSON.stringify(TOSHO) }
+  throw new TypeError('Failed to fetch') // what a CORS or ISP block looks like
+}
+nyaa.settings = {}
+assert(await nyaa.validate() === true, 'validate() succeeds via Anime Tosho')
+const tosho = await nyaa.single({ titles: ['Spy x Family'], episode: 1, resolution: '1080', exclusions: ['HEVC'] })
+assert(lastUrl.includes('q=Spy%20x%20Family%2001%201080p'), 'Anime Tosho query: ' + lastUrl)
+assert(tosho.length === 1, `keeps nyaa items, drops excluded/non-nyaa (got ${tosho.length})`)
+assert(tosho[0].hash === 'abcdef0123456789abcdef0123456789abcdef01', 'hash lowercased')
+assert(tosho[0].size === 1500000000 && tosho[0].downloads === 99, 'size + downloads mapped')
+assert(tosho[0].date.getTime() === 1649512800000, 'timestamp → Date')
+
+console.log('\n=== all sources down → error names each failure ===')
+globalThis.fetch = async () => { throw new TypeError('Failed to fetch') }
+try {
+  await nyaa.single({ titles: ['Test'], episode: 1, resolution: '1080', exclusions: [] })
+  console.error('  FAIL: expected throw'); process.exitCode = 1
+} catch (err) {
+  assert(err.message.split('\n').length === 2, 'error lists nyaa.si and Anime Tosho failures')
+}
+assert(await nyaa.validate() === false, 'validate() false when everything is down')
 
 console.log('\nDone. exit code =', process.exitCode || 0)

@@ -16,6 +16,7 @@ gh:rotten-pizza/shiru-nyaa-extension
 
 | Setting | Description |
 |---|---|
+| Mirror URL | Nyaa instance to query first (use a mirror if your ISP blocks nyaa.si) |
 | Category | English-translated / Non-English / Raw / All |
 | Trusted Uploaders Only | Restrict results to Nyaa's trusted uploader flag |
 
@@ -26,6 +27,8 @@ gh:rotten-pizza/shiru-nyaa-extension
 | `single` | `<title> <NN> <res>p` |
 | `batch` | `<title> 01-NN`, `<title> Batch`, `<title> Complete`, `<title> Season` (merged + deduped) |
 | `movie` | `<title> <res>p` |
+
+If every Nyaa host fails (ISP block, CORS, timeout), the extension falls back to [Anime Tosho](https://animetosho.org)'s JSON feed, which mirrors Nyaa uploads. Category and trusted-only filters can't be applied to fallback results.
 
 Results are sorted by Shiru using seeders, leechers, size, and the `accuracy` hint (Trusted → `high`, Remake → `low`, otherwise `medium`).
 
