@@ -1,6 +1,6 @@
 {
   "name": "shiru-nyaa-extension",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Nyaa.si torrent source extension for Shiru",
   "license": "GPL-3.0",
   "type": "module",
