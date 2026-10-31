@@ -28,6 +28,10 @@ gh:rotten-pizza/shiru-nyaa-extension
 | `batch` | `<title> 01-NN`, `<title> Batch`, `<title> Complete`, `<title> Season` (merged + deduped) |
 | `movie` | `<title> <res>p` |
 
+Shiru passes several titles per show (romaji, English, synonyms). The extension tries up to 4 of them in order and stops at the first one with results. Punctuation that Nyaa's search treats as operators (`: " | * ( ) ~ +`, and `-` at the start or end of a word) is stripped first, so `Re:Zero -Starting Life in Another World-` doesn't exclude "Starting".
+
+Magnet links carry Nyaa's own tracker plus a list of currently working public trackers (UDP, HTTP, and IP-addressed copies in case the ISP's DNS blocks tracker hostnames). More trackers help the client find more peers, but they can't make up for a closed incoming port: behind a VPN without port forwarding (e.g. Proton VPN on Android), expect fewer connected peers than seeders.
+
 If every Nyaa host fails (ISP block, CORS, timeout), the extension falls back to [Anime Tosho](https://animetosho.org)'s JSON feed, which mirrors Nyaa uploads. Category and trusted-only filters can't be applied to fallback results.
 
 Results are sorted by Shiru using seeders, leechers, size, and the `accuracy` hint (Trusted → `high`, Remake → `low`, otherwise `medium`).

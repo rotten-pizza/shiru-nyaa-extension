@@ -2,7 +2,7 @@
   {
     "id": "nyaa",
     "name": "Nyaa",
-    "version": "0.3.1",
+    "version": "0.4.0",
     "main": "sources/nyaa",
     "update": "gh:rotten-pizza/shiru-nyaa-extension",
     "type": "torrent",

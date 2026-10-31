@@ -1,14 +1,30 @@
 import AbstractSource from './abstract.js'
 
+// Appended to every magnet link so the torrent client can find peers before DHT warms up.
+// More working trackers means more peers, which matters most when the client can't accept
+// incoming connections (e.g. behind a VPN with no port forwarding, as on Android).
+// Refreshed from github.com/ngosang/trackerslist (trackers_best) in Oct 2026; the dead
+// coppersurfer.tk / openbittorrent.com entries were removed.
 const TRACKERS = [
+  // Nyaa's own tracker: every Nyaa upload announces here.
   'http://nyaa.tracker.wf:7777/announce',
-  'udp://open.stealth.si:80/announce',
   'udp://tracker.opentrackr.org:1337/announce',
-  'udp://exodus.desync.com:6969/announce',
+  'udp://open.stealth.si:80/announce',
   'udp://tracker.torrent.eu.org:451/announce',
-  'udp://tracker.coppersurfer.tk:6969/announce',
-  'udp://tracker.openbittorrent.com:6969/announce',
-  'udp://tracker.dler.org:6969/announce'
+  'udp://open.demonii.com:1337/announce',
+  'udp://open.tracker.cl:1337/announce',
+  'udp://exodus.desync.com:6969/announce',
+  'udp://explodie.org:6969/announce',
+  'udp://tracker.qu.ax:6969/announce',
+  'udp://tracker-udp.gbitt.info:80/announce',
+  'udp://tracker.gmi.gd:6969/announce',
+  // HTTP trackers still work on networks that drop UDP.
+  'http://tracker.opentrackr.org:1337/announce',
+  'http://tracker.dler.org:6969/announce',
+  // IP-addressed copies of opentrackr and torrent.eu.org, in case the ISP's DNS blocks
+  // tracker hostnames.
+  'udp://93.158.213.92:1337/announce',
+  'udp://91.216.110.53:451/announce'
 ]
 
 const CATEGORIES = {
@@ -66,6 +82,31 @@ function fetchWithTimeout (url, ms = REQUEST_TIMEOUT_MS) {
     timer = setTimeout(() => reject(new Error(`Request to ${url} timed out after ${ms}ms`)), ms)
   })
   return Promise.race([fetch(url), timeout]).finally(() => clearTimeout(timer))
+}
+
+// Shiru passes several titles per show (romaji, English, synonyms). Nyaa searches with
+// Elasticsearch's simple_query_string, where " | * ( ) ~ + are operators and a word starting
+// with - is an exclusion, so a title like "Re:Zero -Starting Life in Another World-" would
+// exclude "Starting". Strip those, plus punctuation that only gets in the way.
+const MAX_TITLE_QUERIES = 4
+
+function cleanTitle (title) {
+  return String(title ?? '')
+    .replace(/["|*()~+:;!?,[\]{}<>\/]/g, ' ')
+    .replace(/(^|\s)-+/g, '$1')
+    .replace(/-+(?=\s|$)/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+function titleCandidates (titles) {
+  const list = []
+  for (const t of titles ?? []) {
+    const clean = cleanTitle(t)
+    if (clean && !list.some(x => x.toLowerCase() === clean.toLowerCase())) list.push(clean)
+    if (list.length >= MAX_TITLE_QUERIES) break
+  }
+  return list
 }
 
 function normalizeHost (raw) {
@@ -173,7 +214,7 @@ export default new class NyaaSource extends AbstractSource {
       if (excluded.some(e => title.toLowerCase().includes(e))) continue
       results.push({
         title,
-        link: item.magnet_uri || this.#magnet(hash, title),
+        link: this.#magnet(hash, title),
         hash,
         seeders: Number(item.seeders) || 0,
         leechers: Number(item.leechers) || 0,
@@ -206,35 +247,50 @@ export default new class NyaaSource extends AbstractSource {
     throw new Error(errors.join('\n'))
   }
 
+  // Tries each title in turn and returns the first non-empty result set. Network errors are
+  // rethrown straight away: if Nyaa and Anime Tosho are unreachable for one title they are
+  // unreachable for all of them, and retrying would only stack up timeouts.
+  async #firstHit (titles, run) {
+    const candidates = titleCandidates(titles)
+    if (!candidates.length) candidates.push('')
+    for (const title of candidates) {
+      const results = await run(title)
+      if (results.length) return results
+    }
+    return []
+  }
+
   async single ({ titles, resolution, episode, exclusions }) {
-    const base = titles?.[0] ?? ''
     const ep = episode != null ? String(episode).padStart(2, '0') : ''
-    return this.#search(`${base} ${ep}`.trim(), resolution, exclusions)
+    return this.#firstHit(titles, base => this.#search(`${base} ${ep}`.trim(), resolution, exclusions))
   }
 
   async batch ({ titles, resolution, episodeCount, exclusions }) {
-    const base = titles?.[0] ?? ''
     const ranges = []
     if (episodeCount) ranges.push(`01-${String(episodeCount).padStart(2, '0')}`)
     ranges.push('Batch', 'Complete', 'Season')
 
-    const settled = await Promise.allSettled(
-      ranges.map(r => this.#search(`${base} ${r}`, resolution, exclusions))
-    )
-    const all = settled.flatMap(s => s.status === 'fulfilled' ? s.value : [])
-
-    const seen = new Set()
-    const deduped = []
-    for (const r of all) {
-      if (seen.has(r.hash)) continue
-      seen.add(r.hash)
-      deduped.push({ ...r, type: 'batch' })
-    }
-    return deduped
+    return this.#firstHit(titles, async base => {
+      const settled = await Promise.allSettled(
+        ranges.map(r => this.#search(`${base} ${r}`.trim(), resolution, exclusions))
+      )
+      if (settled.every(s => s.status === 'rejected')) throw settled[0].reason
+      const seen = new Set()
+      const deduped = []
+      for (const s of settled) {
+        if (s.status !== 'fulfilled') continue
+        for (const r of s.value) {
+          if (seen.has(r.hash)) continue
+          seen.add(r.hash)
+          deduped.push({ ...r, type: 'batch' })
+        }
+      }
+      return deduped
+    })
   }
 
   async movie ({ titles, resolution, exclusions }) {
-    return this.#search(titles?.[0] ?? '', resolution, exclusions)
+    return this.#firstHit(titles, base => this.#search(base, resolution, exclusions))
   }
 
   // Throws instead of returning false so Shiru's error toast shows why each source failed

@@ -185,6 +185,60 @@ assert(await nyaa.validate() === true, 'validate() works through the bridge')
 const bridged = await nyaa.single({ titles: ['Spy x Family'], episode: 1, resolution: '1080', exclusions: [] })
 assert(bridged.length === 3, 'single() works through the bridge')
 
+console.log('\n=== title fallback: empty first title → next title, punctuation stripped ===')
+const EMPTY_RSS = '<?xml version="1.0"?><rss><channel><title>empty</title></channel></rss>'
+let urls = []
+globalThis.fetch = async (url) => {
+  urls.push(url)
+  const q = decodeURIComponent(new URL(url).searchParams.get('q'))
+  return { ok: true, status: 200, text: async () => q.startsWith('Tokyo Revengers Seiya Kessen-hen') ? SAMPLE_RSS : EMPTY_RSS }
+}
+nyaa.settings = {}
+const titled = await nyaa.single({
+  titles: ['Tokyo Revengers: Seiya Kessen-hen', 'tokyo revengers seiya kessen-hen', 'Tokyo Revengers: Christmas Showdown'],
+  episode: 5, resolution: '1080', exclusions: []
+})
+assert(titled.length === 3, `found results via cleaned title (got ${titled.length})`)
+assert(urls.length === 1 && urls[0].includes('q=Tokyo%20Revengers%20Seiya%20Kessen-hen%2005%201080p'), 'colon stripped, inner hyphen kept: ' + urls[0])
+
+urls = []
+globalThis.fetch = async (url) => {
+  urls.push(url)
+  const q = decodeURIComponent(new URL(url).searchParams.get('q'))
+  return { ok: true, status: 200, text: async () => q.startsWith('Re Zero Starting Life in Another World 01') ? SAMPLE_RSS : EMPTY_RSS }
+}
+const rezero = await nyaa.single({ titles: ['Re:Zero kara Hajimeru Isekai Seikatsu', 'Re:Zero -Starting Life in Another World-'], episode: 1, resolution: '1080', exclusions: [] })
+assert(urls.length === 2, `tried second title after empty first (got ${urls.length} requests)`)
+assert(!decodeURIComponent(urls[1]).includes(' -Starting'), 'leading "-" not sent as an exclusion: ' + decodeURIComponent(urls[1]))
+assert(rezero.length === 3, 'second title results returned')
+
+urls = []
+const none = await nyaa.single({ titles: ['A', 'B', 'C', 'D', 'E', 'F'], episode: 1, resolution: '1080', exclusions: [] })
+assert(none.length === 0 && urls.length === 4, `empty everywhere → [] after at most 4 titles (got ${urls.length})`)
+
+urls = []
+const batchFallback = await nyaa.batch({ titles: ['Nope', 'Re Zero Starting Life in Another World'], episodeCount: 12, resolution: '1080', exclusions: [] })
+assert(batchFallback.length === 3 && batchFallback.every(r => r.type === 'batch'), 'batch falls through to next title')
+assert(urls.length === 8, `batch ran 4 range queries per title (got ${urls.length})`)
+
+console.log('\n=== network failure is not retried per title ===')
+let netCalls = 0
+globalThis.fetch = async () => { netCalls++; throw new TypeError('Failed to fetch') }
+try {
+  await nyaa.single({ titles: ['A', 'B', 'C'], episode: 1, resolution: '1080', exclusions: [] })
+  console.error('  FAIL: expected throw'); process.exitCode = 1
+} catch {
+  assert(netCalls === 2, `only nyaa.si + Anime Tosho tried once (got ${netCalls})`)
+}
+
+console.log('\n=== trackers ===')
+globalThis.fetch = async () => ({ ok: true, status: 200, text: async () => SAMPLE_RSS })
+const [withTrackers] = await nyaa.single({ titles: ['Spy x Family'], episode: 1, resolution: '1080', exclusions: [] })
+const trackers = new URL(withTrackers.link).searchParams.getAll('tr')
+assert(trackers[0] === 'http://nyaa.tracker.wf:7777/announce', 'Nyaa tracker listed first')
+assert(!trackers.some(t => /coppersurfer|openbittorrent/.test(t)), 'dead trackers removed')
+assert(trackers.length >= 10, `at least 10 trackers (got ${trackers.length})`)
+
 console.log('\n=== Anime Tosho fallback when every Nyaa host fails ===')
 const TOSHO = [
   { title: '[SubsPlease] Spy x Family - 01 (1080p)', nyaa_id: 1500001, info_hash: 'ABCDEF0123456789ABCDEF0123456789ABCDEF01', magnet_uri: 'magnet:?xt=urn:btih:abcdef0123456789abcdef0123456789abcdef01', seeders: 10, leechers: 2, torrent_downloaded_count: 99, total_size: 1500000000, timestamp: 1649512800 },
@@ -204,6 +258,7 @@ assert(tosho.length === 1, `keeps nyaa items, drops excluded/non-nyaa (got ${tos
 assert(tosho[0].hash === 'abcdef0123456789abcdef0123456789abcdef01', 'hash lowercased')
 assert(tosho[0].size === 1500000000 && tosho[0].downloads === 99, 'size + downloads mapped')
 assert(tosho[0].date.getTime() === 1649512800000, 'timestamp → Date')
+assert(tosho[0].link.includes('&tr=http%3A%2F%2Fnyaa.tracker.wf'), 'Anime Tosho magnets get our tracker list too')
 
 console.log('\n=== all sources down → error names each failure ===')
 globalThis.fetch = async () => { throw new TypeError('Failed to fetch') }
